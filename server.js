@@ -9,6 +9,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Root ruta za test (da prestane 404)
+app.get('/', (req, res) => {
+  res.json({ message: 'Luma Backend is running! Use POST /generate with { emotion: "joy" }' });
+});
+
 const emotionToStyle = {
   joy: 'lo-fi',
   calm: 'ambient',
@@ -25,7 +30,6 @@ const styleDescriptions = {
 
 app.post('/generate', async (req, res) => {
   const { emotion } = req.body;
-
   if (!emotion || !emotionToStyle[emotion.toLowerCase()]) {
     return res.status(400).json({ message: 'Invalid or missing emotion.' });
   }
@@ -35,7 +39,8 @@ app.post('/generate', async (req, res) => {
   const apiKey = process.env.LOUDLY_API_KEY;
 
   try {
-    const loudlyRes = await fetch('https://api.loudly.com/v1/generate', {
+    // 1. Pokreni generisanje
+    let loudlyRes = await fetch('https://api.loudly.com/v1/generate', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -44,21 +49,52 @@ app.post('/generate', async (req, res) => {
       body: JSON.stringify({ style })
     });
 
-    const loudlyData = await loudlyRes.json();
+    let loudlyData = await loudlyRes.json();
+    console.log('Initial generate response:', loudlyData);
 
-    if (!loudlyData.audio_url) {
-      throw new Error('No audio URL returned from Loudly.');
+    if (!loudlyData.task_id) {
+      return res.status(502).json({ message: 'Failed to start generation. Check API key.' });
     }
 
+    const taskId = loudlyData.task_id;
+
+    // 2. Polling za status (Loudly je asinhron)
+    let audioUrl = null;
+    const maxAttempts = 20; // ~60s
+    for (let i = 0; i < maxAttempts; i++) {
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 3000)); // 3s između
+        loudlyRes = await fetch(`https://api.loudly.com/v1/tasks/${taskId}`, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        loudlyData = await loudlyRes.json();
+      }
+      console.log(`Polling ${i + 1}:`, loudlyData);
+
+      if (loudlyData.status === 'completed' && loudlyData.audio_url) {
+        audioUrl = loudlyData.audio_url;
+        break;
+      }
+      if (loudlyData.status === 'failed') {
+        return res.status(502).json({ message: 'Generation failed on Loudly.' });
+      }
+    }
+
+    if (!audioUrl) {
+      return res.status(408).json({ message: 'Timeout: Music generation took too long.' });
+    }
+
+    // 3. Vrati rezultat
     res.json({
       message: `Generated ${style} music for ${emotion}`,
       style,
       description,
-      audio_url: loudlyData.audio_url
+      audio_url: audioUrl
     });
+
   } catch (error) {
-    console.error('Loudly API error:', error);
-    res.status(500).json({ message: 'Error generating music.' });
+    console.error('Error:', error);
+    res.status(500).json({ message: 'Internal server error. Check logs.' });
   }
 });
 
