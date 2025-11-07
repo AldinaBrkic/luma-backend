@@ -51,6 +51,8 @@ app.post('/generate', async (req, res) => {
 
     let loudlyData = await loudlyRes.json();
     console.log('Initial generate response:', loudlyData);
+    console.log('Loudly status:', loudlyRes.status);
+
 
     if (!loudlyData.task_id) {
       return res.status(502).json({ message: 'Failed to start generation. Check API key.' });
