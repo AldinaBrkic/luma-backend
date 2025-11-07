@@ -44,6 +44,7 @@ app.post('/generate', async (req, res) => {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
+        'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ style })
@@ -96,6 +97,7 @@ app.post('/generate', async (req, res) => {
 
   } catch (error) {
     console.error('Error:', error);
+    console.error(error.stack);
     res.status(500).json({ message: 'Internal server error. Check logs.' });
   }
 });
