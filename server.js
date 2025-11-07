@@ -6,10 +6,10 @@ const fetch = require('node-fetch');
 dotenv.config();
 
 const app = express();
-app.use(cors());
+app.use(cors()); // Dozvoli sve (uklj. Vercel)
 app.use(express.json());
 
-// Root ruta za test (da prestane 404)
+// Test ruta
 app.get('/', (req, res) => {
   res.json({ message: 'Luma Backend is running! Use POST /generate with { emotion: "joy" }' });
 });
@@ -39,55 +39,47 @@ app.post('/generate', async (req, res) => {
   const apiKey = process.env.LOUDLY_API_KEY;
 
   try {
-    // 1. Pokreni generisanje
-    let loudlyRes = await fetch('https://api.loudly.com/v1/generate', {
+    // 1. Pokreni generiranje
+    const generateRes = await fetch('https://api.loudly.com/v1/generate', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
-        'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({ style })
     });
 
-    let loudlyData = await loudlyRes.json();
-    console.log('Initial generate response:', loudlyData);
-    console.log('Loudly status:', loudlyRes.status);
+    const data = await generateRes.json();
 
-
-    if (!loudlyData.task_id) {
-      return res.status(502).json({ message: 'Failed to start generation. Check API key.' });
+    if (!data.task_id) {
+      return res.status(502).json({ message: 'Failed to start generation.' });
     }
 
-    const taskId = loudlyData.task_id;
+    const taskId = data.task_id;
 
-    // 2. Polling za status (Loudly je asinhron)
+    // 2. Polling
     let audioUrl = null;
-    const maxAttempts = 20; // ~60s
-    for (let i = 0; i < maxAttempts; i++) {
-      if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 3000)); // 3s između
-        loudlyRes = await fetch(`https://api.loudly.com/v1/tasks/${taskId}`, {
-          headers: { 'Authorization': `Bearer ${apiKey}` }
-        });
-        loudlyData = await loudlyRes.json();
-      }
-      console.log(`Polling ${i + 1}:`, loudlyData);
+    for (let i = 0; i < 25; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const statusRes = await fetch(`https://api.loudly.com/v1/tasks/${taskId}`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      const statusData = await statusRes.json();
 
-      if (loudlyData.status === 'completed' && loudlyData.audio_url) {
-        audioUrl = loudlyData.audio_url;
+      if (statusData.status === 'completed' && statusData.audio_url) {
+        audioUrl = statusData.audio_url;
         break;
       }
-      if (loudlyData.status === 'failed') {
-        return res.status(502).json({ message: 'Generation failed on Loudly.' });
+      if (statusData.status === 'failed') {
+        return res.status(502).json({ message: 'Generation failed.' });
       }
     }
 
     if (!audioUrl) {
-      return res.status(408).json({ message: 'Timeout: Music generation took too long.' });
+      return res.status(408).json({ message: 'Timeout.' });
     }
 
-    // 3. Vrati rezultat
+    // 3. Vrati
     res.json({
       message: `Generated ${style} music for ${emotion}`,
       style,
@@ -96,13 +88,12 @@ app.post('/generate', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error:', error);
-    console.error(error.stack);
-    res.status(500).json({ message: 'Internal server error. Check logs.' });
+    console.error(error);
+    res.status(500).json({ message: 'Server error.' });
   }
 });
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`Luma backend running on port ${PORT}`);
+  console.log(`Backend running on port ${PORT}`);
 });
